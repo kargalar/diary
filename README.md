@@ -1,45 +1,45 @@
+<div align="center">
+  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="Quietly app icon" />
+
 # Quietly
 
-Quietly is a private daily journal for capturing moments, moods, and the people who were there. Review entries over time with simple writing insights and filters.
+**A little space to hear your own thoughts.**
+
+A private, offline journal for daily moments, moods, and reflections.
+
+[![Android](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/kargalar/quietly/releases/latest) [![Release](https://img.shields.io/github/v/release/kargalar/quietly?color=E53935)](https://github.com/kargalar/quietly/releases/latest) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+
+[Download for Android ↓](https://github.com/kargalar/quietly/releases/latest) · [Build from source](#build-from-source) · [Report an issue](https://github.com/kargalar/quietly/issues)
+
+</div>
+
+![Quietly journal editor with a fictional daily reflection](docs/screenshots/quietly-new-entry.png)
+
+## A journal that stays yours
+
+Open a fresh entry, write what is on your mind, and add a mood or rating when you want. Quietly keeps your journal on your device and works without an account.
+
+![Quietly journal home with a clean daily prompt](docs/screenshots/quietly-home.png)
 
 ## Features
 
-- Write and edit journal entries with a title and free-form text.
+- Write and edit entries with a title and free-form text.
 - Add a mood, a 1–5 rating, and people tags.
 - Filter entries by date, rating, mood, and person.
 - Review writing statistics and recurring words in the Analysis view.
 - Choose a light or dark theme.
-- Store entries locally on the device using shared preferences.
+- Keep journal data locally on your device.
 
-## Run the app
+## Build from source
 
 Install [Flutter](https://docs.flutter.dev/get-started/install), then run:
 
 ```sh
 flutter pub get
-flutter run
-```
-
-To create an Android APK:
-
-```sh
-flutter build apk --release
-```
-
-The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
-
-## Development
-
-Run the analyzer and tests before submitting a change:
-
-```sh
 flutter analyze
 flutter test
+flutter run
 ```
-
-## Privacy
-
-Journal entries stay on the device. The app does not include a cloud sync service. Keep a separate backup if you need to preserve entries across device changes.
 
 ## License
 
