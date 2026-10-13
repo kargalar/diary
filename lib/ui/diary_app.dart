@@ -21,7 +21,7 @@ class _DiaryAppState extends State<DiaryApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Quietly',
+      title: 'Video Diary',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: _theme(Brightness.light),
@@ -115,7 +115,7 @@ class _DiaryHomePageState extends State<DiaryHomePage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Quietly',
+          'Video Diary',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [

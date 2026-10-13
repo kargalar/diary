@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="Quietly app icon" />
+  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="Video Diary app icon" />
 
-# Quietly
+# Video Diary
 
 **A little space to hear your own thoughts.**
 
@@ -13,13 +13,13 @@ A private, offline journal for daily moments, moods, and reflections.
 
 </div>
 
-![Quietly journal editor with a fictional daily reflection](docs/screenshots/quietly-new-entry.png)
+![Video Diary journal editor with a fictional daily reflection](docs/screenshots/video-diary-new-entry.png)
 
 ## A journal that stays yours
 
-Open a fresh entry, write what is on your mind, and add a mood or rating when you want. Quietly keeps your journal on your device and works without an account.
+Open a fresh entry, write what is on your mind, and add a mood or rating when you want. Video Diary keeps your journal on your device and works without an account.
 
-![Quietly journal home with a clean daily prompt](docs/screenshots/quietly-home.png)
+![Video Diary journal home with a clean daily prompt](docs/screenshots/video-diary-home.png)
 
 ## Features
 
@@ -43,4 +43,4 @@ flutter run
 
 ## License
 
-Quietly is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+Video Diary is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
