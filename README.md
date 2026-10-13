@@ -13,7 +13,7 @@ An offline journal for writing, reflecting, and noticing the patterns in your da
 
 </div>
 
-![Diary home screen showing the empty journal state](docs/screenshots/diary-home.png)
+![Diary home screen with a sample journal entry and daily mood rating](docs/screenshots/diary-home.png)
 
 ## Make room for reflection
 
