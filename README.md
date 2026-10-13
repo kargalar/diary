@@ -7,9 +7,9 @@
 
 A private, offline journal for daily moments, moods, and reflections.
 
-[![Android](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/kargalar/quietly/releases/latest) [![Release](https://img.shields.io/github/v/release/kargalar/quietly?color=E53935)](https://github.com/kargalar/quietly/releases/latest) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/kargalar/video-diary/releases/latest) [![Release](https://img.shields.io/github/v/release/kargalar/video-diary?color=E53935)](https://github.com/kargalar/video-diary/releases/latest) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-[Download for Android ↓](https://github.com/kargalar/quietly/releases/latest) · [Build from source](#build-from-source) · [Report an issue](https://github.com/kargalar/quietly/issues)
+[Download for Android ↓](https://github.com/kargalar/video-diary/releases/latest) · [Build from source](#build-from-source) · [Report an issue](https://github.com/kargalar/video-diary/issues)
 
 </div>
 
