@@ -1,33 +1,33 @@
 <div align="center">
-  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="Video Diary app icon" />
+  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="Diary app icon" />
 
-# Video Diary
+# Diary
 
-**A little space to hear your own thoughts.**
+**A private space to make sense of everyday moments.**
 
-A private, offline journal for daily moments, moods, and reflections.
+An offline journal for writing, reflecting, and noticing the patterns in your days.
 
-[![Android](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/kargalar/video-diary/releases/latest) [![Release](https://img.shields.io/github/v/release/kargalar/video-diary?color=E53935)](https://github.com/kargalar/video-diary/releases/latest) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/kargalar/diary/releases/latest) [![Release](https://img.shields.io/github/v/release/kargalar/diary?color=E53935)](https://github.com/kargalar/diary/releases/latest) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-[Download for Android ↓](https://github.com/kargalar/video-diary/releases/latest) · [Build from source](#build-from-source) · [Report an issue](https://github.com/kargalar/video-diary/issues)
+[Download for Android ↓](https://github.com/kargalar/diary/releases/latest) · [Build from source](#build-from-source) · [Report an issue](https://github.com/kargalar/diary/issues)
 
 </div>
 
-![Video Diary journal editor with a fictional daily reflection](docs/screenshots/video-diary-new-entry.png)
+![Diary home screen showing the empty journal state](docs/screenshots/diary-home.png)
 
-## A journal that stays yours
+## Make room for reflection
 
-Open a fresh entry, write what is on your mind, and add a mood or rating when you want. Video Diary keeps your journal on your device and works without an account.
+Capture a thought while it is still fresh, add context when it helps, and return to your entries whenever you need a clearer view of your days. Diary keeps entries on your device and works without an account.
 
-![Video Diary journal home with a clean daily prompt](docs/screenshots/video-diary-home.png)
+![Writing a fictional reflection in a new Diary entry](docs/screenshots/diary-new-entry.png)
 
 ## Features
 
-- Write and edit entries with a title and free-form text.
+- Write, edit, and remove journal entries.
 - Add a mood, a 1–5 rating, and people tags.
-- Filter entries by date, rating, mood, and person.
-- Review writing statistics and recurring words in the Analysis view.
-- Choose a light or dark theme.
+- Filter entries by date, mood, rating, or person.
+- Review writing patterns and personal statistics in the Analysis view.
+- Switch between light and dark themes.
 - Keep journal data locally on your device.
 
 ## Build from source
@@ -43,4 +43,4 @@ flutter run
 
 ## License
 
-Video Diary is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+Diary is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
