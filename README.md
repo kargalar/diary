@@ -41,6 +41,19 @@ flutter test
 flutter run
 ```
 
+### Android release signing
+
+Set the existing Kargalar signing credentials in your environment or in the local `android/key.properties` file. Environment variables take precedence. Git ignores the local file.
+
+| Environment variable | `android/key.properties` key |
+| --- | --- |
+| `KARGALAR_KEYSTORE_PATH` | `storeFile` |
+| `KARGALAR_KEYSTORE_PASSWORD` | `storePassword` |
+| `KARGALAR_KEY_ALIAS` | `keyAlias` |
+| `KARGALAR_KEY_PASSWORD` | `keyPassword` |
+
+Use an absolute path for the keystore. In `key.properties` on Windows, use forward slashes in the path. Then run `flutter run --release`.
+
 ## License
 
 Diary is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).

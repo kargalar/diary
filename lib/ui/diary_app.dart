@@ -1,246 +1,483 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../domain/diary_analysis.dart';
 import '../domain/diary_entry.dart';
+import 'diary_theme.dart';
 import 'diary_view_model.dart';
 
-const _accent = Color(0xFF576B5E);
-
 class DiaryApp extends StatefulWidget {
-  const DiaryApp({super.key, required this.viewModel});
+  const DiaryApp({
+    super.key,
+    required this.viewModel,
+    this.initialDarkTheme = true,
+    this.onThemeChanged,
+  });
 
   final DiaryViewModel viewModel;
+  final bool initialDarkTheme;
+  final ValueChanged<bool>? onThemeChanged;
 
   @override
   State<DiaryApp> createState() => _DiaryAppState();
 }
 
 class _DiaryAppState extends State<DiaryApp> {
-  ThemeMode _themeMode = ThemeMode.system;
+  late bool _darkTheme = widget.initialDarkTheme;
+  late final ThemeData _light = buildDiaryTheme(Brightness.light);
+  late final ThemeData _dark = buildDiaryTheme(Brightness.dark);
+
+  void _toggleTheme() {
+    setState(() => _darkTheme = !_darkTheme);
+    widget.onThemeChanged?.call(_darkTheme);
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Diary',
-      debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
-      home: DiaryHomePage(
-        viewModel: widget.viewModel,
-        isDark: _themeMode == ThemeMode.dark,
-        onThemeChanged: () => setState(
-          () => _themeMode = _themeMode == ThemeMode.dark
-              ? ThemeMode.light
-              : ThemeMode.dark,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'Diary',
+    debugShowCheckedModeBanner: false,
+    theme: _light,
+    darkTheme: _dark,
+    themeMode: _darkTheme ? ThemeMode.dark : ThemeMode.light,
+    themeAnimationStyle: AnimationStyle.noAnimation,
+    builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: Theme.of(context).appBarTheme.systemOverlayStyle!,
+      child: child!,
+    ),
+    home: DiaryHomePage(
+      viewModel: widget.viewModel,
+      onToggleTheme: _toggleTheme,
+    ),
+  );
+}
 
-  ThemeData _theme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: _accent,
-      brightness: brightness,
-    );
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: brightness == Brightness.light
-          ? const Color(0xFFF7F7F4)
-          : const Color(0xFF121412),
-      appBarTheme: const AppBarTheme(
-        centerTitle: false,
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: brightness == Brightness.light
-            ? Colors.white
-            : const Color(0xFF1C201D),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: scheme.surfaceContainerHighest.withValues(alpha: .45),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
+class _ContentWidth extends StatelessWidget {
+  const _ContentWidth({required this.child, this.maxWidth = 880});
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topCenter,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: SizedBox(width: double.infinity, child: child),
+    ),
+  );
+}
+
+class _PageBar extends StatelessWidget implements PreferredSizeWidget {
+  const _PageBar({
+    required this.title,
+    this.leading,
+    this.actions = const [],
+    this.maxWidth = 880,
+  });
+
+  final String title;
+  final Widget? leading;
+  final List<Widget> actions;
+  final double maxWidth;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(61);
+
+  @override
+  Widget build(BuildContext context) => AppBar(
+    automaticallyImplyLeading: false,
+    titleSpacing: 0,
+    title: _ContentWidth(
+      maxWidth: maxWidth,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            if (leading != null) ...[leading!, const SizedBox(width: 8)],
+            Expanded(
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            ...actions,
+          ],
         ),
       ),
-    );
-  }
+    ),
+    bottom: const PreferredSize(
+      preferredSize: Size.fromHeight(1),
+      child: Divider(height: 1, thickness: 1),
+    ),
+  );
 }
 
 class DiaryHomePage extends StatefulWidget {
   const DiaryHomePage({
     super.key,
     required this.viewModel,
-    required this.isDark,
-    required this.onThemeChanged,
+    required this.onToggleTheme,
   });
 
   final DiaryViewModel viewModel;
-  final bool isDark;
-  final VoidCallback onThemeChanged;
+  final VoidCallback onToggleTheme;
 
   @override
   State<DiaryHomePage> createState() => _DiaryHomePageState();
 }
 
-class _DiaryHomePageState extends State<DiaryHomePage> {
-  int? _ratingFilter;
-  String? _personFilter;
+class _DiaryHomePageState extends State<DiaryHomePage>
+    with SingleTickerProviderStateMixin {
+  late final _tabs = TabController(
+    length: EntryCategory.values.length,
+    vsync: this,
+  );
+  final _filters = <EntryCategory, _DiaryFilter>{};
 
-  Future<void> _openFilters() async {
-    final filter = await showModalBottomSheet<_DiaryFilter>(
-      context: context,
-      useSafeArea: true,
-      builder: (_) => _FilterSheet(
-        availablePeople: widget.viewModel.people,
-        initialRating: _ratingFilter,
-        initialPerson: _personFilter,
+  EntryCategory get _category => EntryCategory.values[_tabs.index];
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openFilters(EntryCategory category) async {
+    final currentFilter = _filters[category];
+    final filter = await showDiaryPanel<_DiaryFilter>(
+      context,
+      _FilterSheet(
+        availablePeople: widget.viewModel.peopleIn(category),
+        initialRating: currentFilter?.rating,
+        initialPerson: currentFilter?.person,
       ),
     );
-    if (filter == null) return;
-    setState(() {
-      _ratingFilter = filter.rating;
-      _personFilter = filter.person;
-    });
+    if (mounted && filter != null) setState(() => _filters[category] = filter);
+  }
+
+  void _openAnalysis() {
+    final category = _category;
+    Navigator.of(context).push(
+      diaryPageRoute(
+        context,
+        (_) => AnalysisPage(viewModel: widget.viewModel, category: category),
+      ),
+    );
+  }
+
+  Future<void> _openNewEntry() async {
+    final initialCategory = _category;
+    final category = await Navigator.of(context).push(
+      diaryPageRoute<EntryCategory>(
+        context,
+        (_) => NewEntryPage(
+          viewModel: widget.viewModel,
+          initialCategory: initialCategory,
+        ),
+      ),
+    );
+    if (mounted && category != null) {
+      _tabs.animateTo(
+        category.index,
+        duration: diaryAnimation(context).duration,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+    final width =
+        MediaQuery.sizeOf(context).width -
+        MediaQuery.paddingOf(context).horizontal;
+    final wide = width >= 520;
+    final compact = width < 360;
+    final largeLabels = MediaQuery.textScalerOf(context).scale(12) > 16;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Diary',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Analysis',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AnalysisPage(viewModel: widget.viewModel),
+      appBar: _PageBar(
+        title: 'Diary',
+        leading: compact
+            ? null
+            : SizedBox.square(
+                dimension: 34,
+                child: DecoratedBox(
+                  decoration: ShapeDecoration(
+                    color: scheme.surfaceContainer,
+                    shape: diaryControlShape,
+                  ),
+                  child: const Icon(Icons.auto_stories_outlined, size: 18),
+                ),
               ),
+        actions: [
+          if (wide && !largeLabels)
+            Tooltip(
+              message: 'Analysis',
+              child: TextButton.icon(
+                onPressed: _openAnalysis,
+                icon: const Icon(Icons.insights_outlined),
+                label: const Text('Analysis'),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Analysis',
+              onPressed: _openAnalysis,
+              icon: const Icon(Icons.insights_outlined),
             ),
-            icon: const Icon(Icons.insights_outlined),
-          ),
           IconButton(
-            tooltip: 'Filter entries',
-            onPressed: _openFilters,
+            tooltip: dark ? 'Use light theme' : 'Use dark theme',
+            onPressed: widget.onToggleTheme,
             icon: Icon(
-              _ratingFilter != null || _personFilter != null
-                  ? Icons.filter_alt
-                  : Icons.filter_alt_outlined,
-            ),
-          ),
-          IconButton(
-            tooltip: widget.isDark ? 'Use light theme' : 'Use dark theme',
-            onPressed: widget.onThemeChanged,
-            icon: Icon(
-              widget.isDark
-                  ? Icons.light_mode_outlined
-                  : Icons.dark_mode_outlined,
+              dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             ),
           ),
           const SizedBox(width: 8),
+          if (width < 300 || (width < 440 && largeLabels))
+            IconButton.filled(
+              tooltip: 'New entry',
+              style: theme.filledButtonTheme.style,
+              onPressed: _openNewEntry,
+              icon: const Icon(Icons.add),
+            )
+          else
+            FilledButton.icon(
+              onPressed: _openNewEntry,
+              icon: const Icon(Icons.add),
+              label: const Text('New entry'),
+            ),
         ],
       ),
-      body: ListenableBuilder(
-        listenable: widget.viewModel,
-        builder: (context, _) {
-          final entries = widget.viewModel.entries.where((entry) {
-            final matchesRating =
-                _ratingFilter == null || entry.rating == _ratingFilter;
-            final matchesPerson =
-                _personFilter == null || entry.people.contains(_personFilter);
-            return matchesRating && matchesPerson;
-          }).toList();
-          if (entries.isEmpty) return const _EmptyState();
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (_, index) =>
-                _EntryCard(entry: entries[index], viewModel: widget.viewModel),
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        tooltip: 'New entry',
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => NewEntryPage(viewModel: widget.viewModel),
+      body: SafeArea(
+        top: false,
+        child: _ContentWidth(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TabBar(
+                  controller: _tabs,
+                  tabs: const [
+                    Tab(text: 'Diary'),
+                    Tab(text: 'Note'),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: widget.viewModel,
+                  builder: (context, _) => TabBarView(
+                    controller: _tabs,
+                    children: [
+                      for (final category in EntryCategory.values)
+                        _buildCategory(context, category),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        icon: const Icon(Icons.edit_outlined),
-        label: const Text('New entry'),
       ),
+    );
+  }
+
+  Widget _buildCategory(BuildContext context, EntryCategory category) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final filter = _filters[category] ?? const _DiaryFilter();
+    final hasFilters = filter.rating != null || filter.person != null;
+    final entries = widget.viewModel.entriesIn(category).where((entry) {
+      return (filter.rating == null || entry.rating == filter.rating) &&
+          (filter.person == null || entry.people.contains(filter.person));
+    }).toList();
+    final text = theme.textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Entries', style: text.titleLarge),
+                    const SizedBox(height: 2),
+                    Text(
+                      entries.length == 1
+                          ? '1 entry'
+                          : '${entries.length} entries',
+                      style: text.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              Tooltip(
+                message: 'Filter entries',
+                child: OutlinedButton.icon(
+                  style: hasFilters
+                      ? OutlinedButton.styleFrom(
+                          backgroundColor: scheme.surfaceContainerHigh,
+                        )
+                      : null,
+                  onPressed: () => _openFilters(category),
+                  icon: Icon(hasFilters ? Icons.tune : Icons.tune_outlined),
+                  label: const Text('Filter'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (hasFilters)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (filter.rating case final rating?)
+                  Chip(label: Text('Rating: $rating / 5')),
+                if (filter.person case final person?)
+                  Chip(
+                    avatar: const Icon(Icons.person_outline, size: 14),
+                    label: Text(person),
+                  ),
+                TextButton(
+                  onPressed: () => setState(() => _filters.remove(category)),
+                  child: const Text('Clear filters'),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: entries.isEmpty
+              ? _EmptyState(filtered: hasFilters, category: category)
+              : ListView.separated(
+                  key: PageStorageKey(category),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (_, index) => _EntryCard(
+                    key: ValueKey(entries[index].id),
+                    entry: entries[index],
+                    viewModel: widget.viewModel,
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  const _EmptyState({
+    this.filtered = false,
+    this.analysis = false,
+    this.category = EntryCategory.diary,
+  });
+
+  final bool filtered;
+  final bool analysis;
+  final EntryCategory category;
 
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final isDream = category == EntryCategory.dream;
+    final title = filtered
+        ? 'No matching entries'
+        : analysis
+        ? 'No entries to analyze'
+        : isDream
+        ? 'No dreams yet'
+        : 'Your story starts here';
+    final message = filtered
+        ? 'Change or clear your filters to see more entries.'
+        : analysis
+        ? 'Your writing patterns will appear here once you add an entry.'
+        : isDream
+        ? 'Write down a dream you remember.'
+        : 'Write down a thought, a moment, or how today felt.';
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.auto_stories_outlined,
-              size: 46,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'Your story starts here',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Write down a thought, a moment, or simply how today felt.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    filtered
+                        ? Icons.tune_outlined
+                        : analysis
+                        ? Icons.insights_outlined
+                        : Icons.auto_stories_outlined,
+                    size: 24,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: text.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: text.bodySmall,
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({required this.entry, required this.viewModel});
+enum _EntryAction { edit, delete }
+
+class _EntryCard extends StatefulWidget {
+  const _EntryCard({super.key, required this.entry, required this.viewModel});
 
   final DiaryEntry entry;
   final DiaryViewModel viewModel;
 
-  Future<void> _confirmDelete(BuildContext context) async {
+  @override
+  State<_EntryCard> createState() => _EntryCardState();
+}
+
+class _EntryCardState extends State<_EntryCard> {
+  bool _focused = false;
+
+  Future<void> _confirmDelete() async {
+    final entry = widget.entry;
+    final viewModel = widget.viewModel;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      animationStyle: diaryAnimation(context),
+      builder: (context) => AlertDialog(
         title: const Text('Delete entry?'),
-        content: Text('Are you sure you want to delete “${entry.title}”?'),
+        content: Text('“${entry.title}” will be permanently deleted.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.error,
-              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),
@@ -250,205 +487,212 @@ class _EntryCard extends StatelessWidget {
     if (confirmed == true) await viewModel.remove(entry.id);
   }
 
+  void _openEntry() => Navigator.of(context).push(
+    diaryPageRoute(
+      context,
+      (_) =>
+          NewEntryPage(viewModel: widget.viewModel, initialEntry: widget.entry),
+    ),
+  );
+
+  void _selectAction(_EntryAction action) {
+    switch (action) {
+      case _EntryAction.edit:
+        _openEntry();
+      case _EntryAction.delete:
+        _confirmDelete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final entry = widget.entry;
+    final theme = Theme.of(context);
+    final text = theme.textTheme;
+    final scheme = theme.colorScheme;
     return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => EntryReadPage(entry: entry, viewModel: viewModel),
-          ),
-        ),
-        onLongPress: () => _confirmDelete(context),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+      shape: _focused
+          ? diaryCardShape.copyWith(
+              side: BorderSide(color: scheme.primary, width: 2),
+            )
+          : null,
+      child: Stack(
+        children: [
+          InkWell(
+            onTap: _openEntry,
+            onLongPress: _confirmDelete,
+            onFocusChange: (focused) => setState(() => _focused = focused),
+            hoverColor: scheme.surfaceContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(entry.mood.emoji, style: const TextStyle(fontSize: 24)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _formatDate(entry.createdAt),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 40),
+                    child: Row(
+                      children: [
+                        _MoodMark(mood: entry.mood),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _formatDate(entry.createdAt),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodySmall,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _RatingMark(rating: entry.rating),
+                      ],
                     ),
                   ),
-                  const Icon(
-                    Icons.star_rounded,
-                    size: 18,
-                    color: Color(0xFF9A7A42),
+                  const SizedBox(height: 8),
+                  Text(entry.title, style: text.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    entry.body,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
-                  const SizedBox(width: 4),
-                  Text('${entry.rating}/5 ${entry.rating.emoji}'),
+                  if (entry.people.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _PeopleTags(people: entry.people),
+                  ],
                 ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                entry.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                entry.body,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  height: 1.5,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: PopupMenuButton<_EntryAction>(
+              tooltip: 'Entry actions',
+              icon: const Icon(Icons.more_horiz),
+              position: PopupMenuPosition.under,
+              popUpAnimationStyle: diaryAnimation(context),
+              onSelected: _selectAction,
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: _EntryAction.edit,
+                  height: 42,
+                  child: _MenuLabel(icon: Icons.edit_outlined, label: 'Edit'),
                 ),
-              ),
-              if (entry.people.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: entry.people
-                      .map(
-                        (person) => Chip(
-                          avatar: const Icon(Icons.person_outline, size: 16),
-                          label: Text(person),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      )
-                      .toList(),
+                PopupMenuItem(
+                  value: _EntryAction.delete,
+                  height: 42,
+                  child: _MenuLabel(
+                    icon: Icons.delete_outline,
+                    label: 'Delete',
+                    color: scheme.error,
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuLabel extends StatelessWidget {
+  const _MenuLabel({required this.icon, required this.label, this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 16, color: color),
+      const SizedBox(width: 8),
+      Text(label, style: TextStyle(color: color)),
+    ],
+  );
+}
+
+class _MoodMark extends StatelessWidget {
+  const _MoodMark({required this.mood});
+
+  final Mood mood;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: mood.label,
+    child: SizedBox.square(
+      dimension: 28,
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          shape: diaryControlShape,
+        ),
+        child: Center(
+          child: Text(mood.emoji, style: const TextStyle(fontSize: 16)),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-class EntryReadPage extends StatefulWidget {
-  const EntryReadPage({
-    super.key,
-    required this.entry,
-    required this.viewModel,
-  });
+class _RatingMark extends StatelessWidget {
+  const _RatingMark({required this.rating});
 
-  final DiaryEntry entry;
-  final DiaryViewModel viewModel;
+  final int rating;
 
   @override
-  State<EntryReadPage> createState() => _EntryReadPageState();
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        Icons.star_rounded,
+        size: 16,
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFFDFC18B)
+            : const Color(0xFF85602E),
+      ),
+      const SizedBox(width: 4),
+      Text('$rating/5', style: Theme.of(context).textTheme.labelMedium),
+    ],
+  );
 }
 
-class _EntryReadPageState extends State<EntryReadPage> {
-  late DiaryEntry _entry;
+class _PeopleTags extends StatelessWidget {
+  const _PeopleTags({required this.people});
+
+  final List<String> people;
 
   @override
-  void initState() {
-    super.initState();
-    _entry = widget.entry;
-  }
-
-  Future<void> _edit() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            NewEntryPage(viewModel: widget.viewModel, initialEntry: _entry),
-      ),
-    );
-    if (!mounted) return;
-    final updated = widget.viewModel.entries.firstWhere(
-      (entry) => entry.id == _entry.id,
-      orElse: () => _entry,
-    );
-    setState(() => _entry = updated);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reading'),
-        actions: [
-          IconButton(
-            tooltip: 'Edit entry',
-            onPressed: _edit,
-            icon: const Icon(Icons.edit_outlined),
+  Widget build(BuildContext context) => Wrap(
+    spacing: 8,
+    runSpacing: 6,
+    children: [
+      for (final person in people)
+        Chip(
+          avatar: Icon(
+            Icons.person_outline,
+            size: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
-        children: [
-          Text(
-            _formatDate(_entry.createdAt),
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text(_entry.mood.emoji, style: const TextStyle(fontSize: 30)),
-              const SizedBox(width: 10),
-              Text(
-                _entry.mood.label,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const Spacer(),
-              Text(
-                '${_entry.rating}/5 ${_entry.rating.emoji}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Text(
-            _entry.title,
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 20),
-          SelectableText(
-            _entry.body,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(height: 1.65),
-          ),
-          if (_entry.people.isNotEmpty) ...[
-            const SizedBox(height: 28),
-            const _SectionTitle('People'),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: _entry.people
-                  .map(
-                    (person) => Chip(
-                      avatar: const Icon(Icons.person_outline, size: 16),
-                      label: Text(person),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
+          label: Text(person, overflow: TextOverflow.ellipsis),
+        ),
+    ],
+  );
 }
 
 class AnalysisPage extends StatefulWidget {
-  const AnalysisPage({super.key, required this.viewModel});
+  const AnalysisPage({
+    super.key,
+    required this.viewModel,
+    this.category = EntryCategory.diary,
+  });
 
   final DiaryViewModel viewModel;
+  final EntryCategory category;
 
   @override
   State<AnalysisPage> createState() => _AnalysisPageState();
@@ -460,219 +704,261 @@ class _AnalysisPageState extends State<AnalysisPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Analysis')),
-      body: ListenableBuilder(
-        listenable: widget.viewModel,
-        builder: (context, _) {
-          final allEntries = widget.viewModel.entries;
-          if (allEntries.isEmpty) return const _EmptyState();
-          final analysis = DiaryAnalysis(
-            allEntries,
-            now: DateTime.now(),
-            days: _days,
-          );
-          final entries = analysis.entries;
-          if (entries.isEmpty) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: _PeriodPicker(
+      appBar: const _PageBar(title: 'Analysis', leading: BackButton()),
+      body: SafeArea(
+        top: false,
+        child: _ContentWidth(
+          child: ListenableBuilder(
+            listenable: widget.viewModel,
+            builder: (context, _) {
+              final allEntries = widget.viewModel.entriesIn(widget.category);
+              if (allEntries.isEmpty) return const _EmptyState(analysis: true);
+              final analysis = DiaryAnalysis(
+                allEntries,
+                now: DateTime.now(),
+                days: _days,
+              );
+              final entries = analysis.entries;
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  _PeriodPicker(
                     selected: _days,
                     onSelected: (days) => setState(() => _days = days),
                   ),
-                ),
-                const Expanded(
-                  child: Center(child: Text('No entries in this period.')),
-                ),
-              ],
-            );
-          }
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
-            children: [
-              _PeriodPicker(
-                selected: _days,
-                onSelected: (days) => setState(() => _days = days),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Entries',
-                      value: '${entries.length}',
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Average rating',
-                      value: '${analysis.averageRating.toStringAsFixed(1)} / 5',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _SummaryCard(analysis: analysis),
-              const SizedBox(height: 24),
-              const _SectionTitle('Rating trend'),
-              const SizedBox(height: 10),
-              _TrendChart(points: analysis.trend),
-              const SizedBox(height: 24),
-              const _SectionTitle('Mood distribution'),
-              const SizedBox(height: 10),
-              _DistributionCard(
-                rows: [
-                  for (final mood in Mood.values)
-                    if ((analysis.moodCounts[mood] ?? 0) > 0)
-                      _DistributionRow(
-                        label: '${mood.emoji} ${mood.label}',
-                        count: analysis.moodCounts[mood]!,
+                  const SizedBox(height: 16),
+                  if (entries.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text('No entries in this period.'),
                       ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('Rating distribution'),
-              const SizedBox(height: 10),
-              _DistributionCard(
-                rows: [
-                  for (var rating = 1; rating <= 5; rating++)
-                    _DistributionRow(
-                      label: '$rating ${rating.emoji}',
-                      count: analysis.ratingCounts[rating]!,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('Writing habits'),
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Wrap(
-                    spacing: 28,
-                    runSpacing: 18,
-                    children: [
-                      _SmallStat(
-                        'Current streak',
-                        '${analysis.currentStreak} days',
-                      ),
-                      _SmallStat(
-                        'Longest streak',
-                        '${analysis.longestStreak} days',
-                      ),
-                      _SmallStat(
-                        'Days this month',
-                        '${analysis.daysWrittenThisMonth}',
-                      ),
-                      _SmallStat(
-                        'Most active day',
-                        analysis.mostActiveWeekday == null
-                            ? '—'
-                            : _weekdayName(analysis.mostActiveWeekday!),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('Days of the week'),
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    children: [
-                      for (final day in analysis.weekdays)
-                        _MetricBar(
-                          label: _weekdayName(day.weekday),
-                          value: day.averageRating,
-                          max: 5,
-                          trailing: day.entryCount == 0
-                              ? 'No data'
-                              : '${day.averageRating.toStringAsFixed(1)} · ${day.entryCount}',
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StatCard(
+                            label: 'Entries',
+                            value: '${entries.length}',
+                          ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('People and their impact'),
-              const SizedBox(height: 10),
-              if (analysis.people.isEmpty)
-                const Text('Tag people in your entries to see them here.')
-              else
-                ...analysis.people.map(
-                  (person) => Card(
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        child: Text(person.name.substring(0, 1).toUpperCase()),
-                      ),
-                      title: Text(person.name),
-                      subtitle: Text(
-                        '${person.entryCount} ${person.entryCount == 1 ? 'entry' : 'entries'} · '
-                        '${person.topMood?.emoji ?? ''} ${person.topMood?.label ?? ''}'
-                        '${person.entryCount < 3 ? ' · Limited data' : ''}',
-                      ),
-                      trailing: Text(
-                        '${person.averageRating.toStringAsFixed(1)}\n'
-                        '${_signed(person.averageRating - analysis.averageRating)}',
-                        textAlign: TextAlign.end,
-                      ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StatCard(
+                            label: 'Average rating',
+                            value:
+                                '${analysis.averageRating.toStringAsFixed(1)} / 5',
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-              const _SectionTitle('Writing intensity'),
-              const SizedBox(height: 10),
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.notes_outlined),
-                      title: const Text('Average entry length'),
-                      subtitle: Text(
-                        '${analysis.averageWordCount.toStringAsFixed(0)} words'
-                        '${analysis.wordCountChange == null ? '' : ' · ${_signed(analysis.wordCountChange!)} vs previous period'}',
-                      ),
-                    ),
-                    if (analysis.longestEntry case final entry?)
-                      ListTile(
-                        leading: const Icon(Icons.article_outlined),
-                        title: const Text('Longest entry'),
-                        subtitle: Text(entry.title),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('Most used words'),
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: analysis.topWords.isEmpty
-                      ? const Text(
-                          'Write a little more to see recurring words.',
-                        )
-                      : Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final word in analysis.topWords)
-                              Chip(label: Text('${word.word} · ${word.count}')),
+                    const SizedBox(height: 12),
+                    _SummaryCard(analysis: analysis),
+                    const SizedBox(height: 24),
+                    const _SectionTitle('Rating trend'),
+                    const SizedBox(height: 10),
+                    _TrendChart(points: analysis.trend),
+                    const SizedBox(height: 24),
+                    _AnalysisPair(
+                      first: _AnalysisSection(
+                        title: 'Mood distribution',
+                        child: _DistributionCard(
+                          rows: [
+                            for (final mood in Mood.values)
+                              if ((analysis.moodCounts[mood] ?? 0) > 0)
+                                _DistributionRow(
+                                  label: '${mood.emoji} ${mood.label}',
+                                  count: analysis.moodCounts[mood]!,
+                                ),
                           ],
                         ),
-                ),
-              ),
-            ],
-          );
-        },
+                      ),
+                      second: _AnalysisSection(
+                        title: 'Rating distribution',
+                        child: _DistributionCard(
+                          rows: [
+                            for (var rating = 1; rating <= 5; rating++)
+                              _DistributionRow(
+                                label: '$rating ${rating.emoji}',
+                                count: analysis.ratingCounts[rating]!,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('Writing habits'),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Wrap(
+                          spacing: 28,
+                          runSpacing: 18,
+                          children: [
+                            _SmallStat(
+                              'Current streak',
+                              '${analysis.currentStreak} days',
+                            ),
+                            _SmallStat(
+                              'Longest streak',
+                              '${analysis.longestStreak} days',
+                            ),
+                            _SmallStat(
+                              'Days this month',
+                              '${analysis.daysWrittenThisMonth}',
+                            ),
+                            _SmallStat(
+                              'Most active day',
+                              analysis.mostActiveWeekday == null
+                                  ? '—'
+                                  : _weekdayName(analysis.mostActiveWeekday!),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('Days of the week'),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          children: [
+                            for (final day in analysis.weekdays)
+                              _MetricBar(
+                                label: _weekdayName(day.weekday),
+                                value: day.averageRating,
+                                max: 5,
+                                trailing: day.entryCount == 0
+                                    ? 'No data'
+                                    : '${day.averageRating.toStringAsFixed(1)} · ${day.entryCount}',
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('People and their impact'),
+                    const SizedBox(height: 8),
+                    if (analysis.people.isEmpty)
+                      const Text('Tag people in your entries to see them here.')
+                    else
+                      ...analysis.people.map(
+                        (person) => Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.person_outline),
+
+                            title: Text(person.name),
+                            subtitle: Text(
+                              '${person.entryCount} ${person.entryCount == 1 ? 'entry' : 'entries'} · '
+                              '${person.topMood?.emoji ?? ''} ${person.topMood?.label ?? ''}'
+                              '${person.entryCount < 3 ? ' · Limited data' : ''}',
+                            ),
+                            trailing: Text(
+                              '${person.averageRating.toStringAsFixed(1)}\n'
+                              '${_signed(person.averageRating - analysis.averageRating)}',
+                              style: Theme.of(context).textTheme.labelMedium,
+                              textAlign: TextAlign.end,
+                            ),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('Writing intensity'),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.notes_outlined),
+                            title: const Text('Average entry length'),
+                            subtitle: Text(
+                              '${analysis.averageWordCount.toStringAsFixed(0)} words'
+                              '${analysis.wordCountChange == null ? '' : ' · ${_signed(analysis.wordCountChange!)} vs previous period'}',
+                            ),
+                          ),
+                          if (analysis.longestEntry case final entry?)
+                            ListTile(
+                              leading: const Icon(Icons.article_outlined),
+                              title: const Text('Longest entry'),
+                              subtitle: Text(entry.title),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('Most used words'),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: analysis.topWords.isEmpty
+                            ? const Text(
+                                'Write a little more to see recurring words.',
+                              )
+                            : Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final word in analysis.topWords)
+                                    Chip(
+                                      label: Text(
+                                        '${word.word} · ${word.count}',
+                                      ),
+                                    ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
+}
+
+class _AnalysisPair extends StatelessWidget {
+  const _AnalysisPair({required this.first, required this.second});
+
+  final Widget first;
+  final Widget second;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => constraints.maxWidth >= 560
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: first),
+              const SizedBox(width: 12),
+              Expanded(child: second),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [first, const SizedBox(height: 20), second],
+          ),
+  );
+}
+
+class _AnalysisSection extends StatelessWidget {
+  const _AnalysisSection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [_SectionTitle(title), const SizedBox(height: 8), child],
+  );
 }
 
 class _PeriodPicker extends StatelessWidget {
@@ -684,23 +970,19 @@ class _PeriodPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Wrap(
     spacing: 8,
-    runSpacing: 8,
     children: [
       for (final option in const [
         (7, '7 days'),
         (30, '30 days'),
         (90, '90 days'),
+        (null, 'All time'),
       ])
         ChoiceChip(
           label: Text(option.$2),
           selected: selected == option.$1,
+          chipAnimationStyle: _chipMotion(context),
           onSelected: (_) => onSelected(option.$1),
         ),
-      ChoiceChip(
-        label: const Text('All time'),
-        selected: selected == null,
-        onSelected: (_) => onSelected(null),
-      ),
     ],
   );
 }
@@ -716,15 +998,16 @@ class _SummaryCard extends StatelessWidget {
       (a, b) => a.value >= b.value ? a : b,
     );
     final change = analysis.ratingChange;
+    final count = analysis.entries.length;
     return Card(
       child: ListTile(
         leading: const Icon(Icons.auto_awesome_outlined),
         title: const Text('Period summary'),
         subtitle: Text(
-          'You wrote ${analysis.entries.length} entries. Your average was '
+          'You wrote $count ${count == 1 ? 'entry' : 'entries'}. Your average was '
           '${analysis.averageRating.toStringAsFixed(1)}/5'
-          '${change == null ? '' : ' (${_signed(change)} vs previous period)'}; '
-          'your most common mood was ${mood.key.emoji} ${mood.key.label}.',
+          '${change == null ? '' : ' (${_signed(change)} vs previous period)'}. '
+          'Your most common mood was ${mood.key.emoji} ${mood.key.label}.',
         ),
       ),
     );
@@ -737,55 +1020,78 @@ class _TrendChart extends StatelessWidget {
   final List<TrendPoint> points;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: SizedBox(
-      height: 160,
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = theme.textTheme.labelSmall;
+    final labelSize = MediaQuery.textScalerOf(
+      context,
+    ).scale(label?.fontSize ?? 11);
+    final slotWidth = math.max(42.0, labelSize * 4);
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (final point in points)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Tooltip(
-                    message:
-                        '${_shortDate(point.date)} · ${point.averageRating.toStringAsFixed(1)}/5',
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          point.averageRating.toStringAsFixed(1),
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                        const SizedBox(height: 4),
-                        Flexible(
-                          child: FractionallySizedBox(
-                            heightFactor: point.averageRating / 5,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(6),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final chart = SizedBox(
+              width: math.max(constraints.maxWidth, slotWidth * points.length),
+              height: 92 + labelSize * 3,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final point in points)
+                    Expanded(
+                      child: Tooltip(
+                        message:
+                            '${_shortDate(point.date)} · ${point.averageRating.toStringAsFixed(1)}/5',
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text(
+                              point.averageRating.toStringAsFixed(1),
+                              style: label,
+                            ),
+                            const SizedBox(height: 4),
+                            Flexible(
+                              child: FractionallySizedBox(
+                                heightFactor: point.averageRating / 5,
+                                child: SizedBox(
+                                  width: 24,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: scheme.tertiary,
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _shortDate(point.date),
+                              style: label?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 5),
-                        Text(
-                          '${point.date.day}',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
-          ],
+            );
+            if (slotWidth * points.length <= constraints.maxWidth) return chart;
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: chart,
+            );
+          },
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _DistributionRow {
@@ -843,18 +1149,30 @@ class _MetricBar extends StatelessWidget {
       children: [
         SizedBox(
           width: 92,
-          child: Text(label, overflow: TextOverflow.ellipsis),
+          child: Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: LinearProgressIndicator(
             value: max == 0 ? 0 : value / max,
-            minHeight: 9,
+            minHeight: 6,
             borderRadius: BorderRadius.circular(6),
           ),
         ),
         const SizedBox(width: 8),
-        SizedBox(width: 72, child: Text(trailing, textAlign: TextAlign.end)),
+        SizedBox(
+          width: 66,
+          child: Text(
+            trailing,
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+        ),
       ],
     ),
   );
@@ -872,12 +1190,7 @@ class _SmallStat extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 4),
         Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
       ],
@@ -899,12 +1212,7 @@ class _StatCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             Text(
               value,
@@ -941,21 +1249,10 @@ class _FilterSheetState extends State<_FilterSheet> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ),
-          const SizedBox(height: 18),
           Row(
             children: [
               const Expanded(child: _SectionTitle('Filter entries')),
@@ -963,6 +1260,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                 onPressed: () => Navigator.pop(context, const _DiaryFilter()),
                 child: const Text('Clear'),
               ),
+              const SizedBox(width: 8),
               FilledButton(
                 onPressed: () => Navigator.pop(
                   context,
@@ -973,18 +1271,20 @@ class _FilterSheetState extends State<_FilterSheet> {
             ],
           ),
           const SizedBox(height: 22),
-          const _SectionTitle('Day rating'),
+          const _FieldLabel('Day rating'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             children: [
               FilterChip(
+                chipAnimationStyle: _chipMotion(context),
                 label: const Text('Any'),
                 selected: _rating == null,
                 onSelected: (_) => setState(() => _rating = null),
               ),
               for (var rating = 1; rating <= 5; rating++)
                 FilterChip(
+                  chipAnimationStyle: _chipMotion(context),
                   label: Text('$rating ${rating.emoji}'),
                   selected: _rating == rating,
                   onSelected: (_) => setState(() => _rating = rating),
@@ -993,18 +1293,20 @@ class _FilterSheetState extends State<_FilterSheet> {
           ),
           if (widget.availablePeople.isNotEmpty) ...[
             const SizedBox(height: 22),
-            const _SectionTitle('Person'),
+            const _FieldLabel('Person'),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               children: [
                 FilterChip(
+                  chipAnimationStyle: _chipMotion(context),
                   label: const Text('Everyone'),
                   selected: _person == null,
                   onSelected: (_) => setState(() => _person = null),
                 ),
                 ...widget.availablePeople.map(
                   (person) => FilterChip(
+                    chipAnimationStyle: _chipMotion(context),
                     label: Text(person),
                     selected: _person == person,
                     onSelected: (_) => setState(() => _person = person),
@@ -1027,100 +1329,204 @@ class _DiaryFilter {
 }
 
 class NewEntryPage extends StatefulWidget {
-  const NewEntryPage({super.key, required this.viewModel, this.initialEntry});
+  const NewEntryPage({
+    super.key,
+    required this.viewModel,
+    this.initialEntry,
+    this.initialCategory = EntryCategory.diary,
+  });
 
   final DiaryViewModel viewModel;
   final DiaryEntry? initialEntry;
+  final EntryCategory initialCategory;
 
   @override
   State<NewEntryPage> createState() => _NewEntryPageState();
 }
 
 class _NewEntryPageState extends State<NewEntryPage> {
-  final _bodyController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _titleFocus = FocusNode();
+  final _bodyFocus = FocusNode();
+  late final _titleController = TextEditingController(
+    text: widget.initialEntry?.title,
+  );
+  late final _bodyController = TextEditingController(
+    text: widget.initialEntry?.body,
+  );
+  late _EntryDetails _details = _EntryDetails(
+    mood: widget.initialEntry?.mood ?? Mood.disappointed,
+    rating: widget.initialEntry?.rating ?? 3,
+    people: widget.initialEntry?.people ?? const [],
+  );
+  late EntryCategory _category =
+      widget.initialEntry?.category ?? widget.initialCategory;
   bool _saving = false;
 
   bool get _isEditing => widget.initialEntry != null;
 
   @override
-  void initState() {
-    super.initState();
-    _bodyController.text = widget.initialEntry?.body ?? '';
-  }
-
-  @override
   void dispose() {
+    _titleController.dispose();
     _bodyController.dispose();
+    _titleFocus.dispose();
+    _bodyFocus.dispose();
     super.dispose();
   }
 
   Future<void> _finishEntry() async {
-    if (_saving) return;
-    if (_bodyController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Write something before saving.')),
-      );
+    FocusScope.of(context).unfocus();
+    final details = await showDiaryPanel<_EntryDetails>(
+      context,
+      _EntryDetailsSheet(
+        availablePeople: widget.viewModel.people,
+        initialDetails: _details,
+      ),
+      bottomSheet: true,
+    );
+    if (details == null || !mounted) return;
+    _details = details;
+
+    final title = _titleController.text.trim();
+    final body = _bodyController.text.trim();
+    if (!_formKey.currentState!.validate()) {
+      (title.isEmpty ? _titleFocus : _bodyFocus).requestFocus();
       return;
     }
 
-    final details = await showModalBottomSheet<_EntryDetails>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _EntryDetailsSheet(
-        availablePeople: widget.viewModel.people,
-        initialEntry: widget.initialEntry,
-      ),
-    );
-    if (details == null || !mounted) return;
-
     setState(() => _saving = true);
     final existingEntry = widget.initialEntry;
+    final now = DateTime.now();
     final entry = DiaryEntry(
-      id: existingEntry?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-      title: details.title,
-      body: _bodyController.text.trim(),
-      createdAt: existingEntry?.createdAt ?? DateTime.now(),
+      id: existingEntry?.id ?? now.microsecondsSinceEpoch.toString(),
+      title: title,
+      body: body,
+      createdAt: existingEntry?.createdAt ?? now,
       mood: details.mood,
       rating: details.rating,
       people: details.people,
+      category: _category,
     );
     if (_isEditing) {
       await widget.viewModel.update(entry);
     } else {
       await widget.viewModel.add(entry);
     }
-    if (mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context, _category);
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final bodyBorder = OutlineInputBorder(
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide(color: scheme.outlineVariant),
+    );
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit entry' : 'New entry'),
+      appBar: _PageBar(
+        title: _isEditing ? 'Edit entry' : 'New entry',
+        maxWidth: 740,
+        leading: const BackButton(),
         actions: [
-          IconButton(
-            tooltip: 'Save entry',
+          IconButton.filled(
+            tooltip: 'Entry details',
             onPressed: _saving ? null : _finishEntry,
-            icon: const Icon(Icons.check),
+            style: theme.filledButtonTheme.style,
+            icon: const Icon(Icons.edit_outlined),
           ),
-          const SizedBox(width: 8),
         ],
       ),
       body: SafeArea(
-        child: TextField(
-          controller: _bodyController,
-          autofocus: true,
-          expands: true,
-          maxLines: null,
-          minLines: null,
-          textCapitalization: TextCapitalization.sentences,
-          textAlignVertical: TextAlignVertical.top,
-          decoration: const InputDecoration(
-            hintText: 'Write freely…',
-            border: InputBorder.none,
-            filled: false,
-            contentPadding: EdgeInsets.fromLTRB(20, 12, 20, 20),
+        top: false,
+        child: _ContentWidth(
+          maxWidth: 740,
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+              child: SizedBox(
+                height: math.max(240, constraints.maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_isEditing) ...[
+                          SegmentedButton<EntryCategory>(
+                            style: const ButtonStyle(
+                              shape: WidgetStatePropertyAll(diaryControlShape),
+                            ),
+                            segments: const [
+                              ButtonSegment(
+                                value: EntryCategory.diary,
+                                label: Text('Diary'),
+                              ),
+                              ButtonSegment(
+                                value: EntryCategory.dream,
+                                label: Text('Dream'),
+                              ),
+                            ],
+                            selected: {_category},
+                            showSelectedIcon: false,
+                            onSelectionChanged: _saving
+                                ? null
+                                : (selection) => setState(
+                                    () => _category = selection.single,
+                                  ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        TextFormField(
+                          controller: _titleController,
+                          focusNode: _titleFocus,
+                          autofocus: !_isEditing,
+                          readOnly: _saving,
+                          style: theme.textTheme.titleLarge,
+                          textCapitalization: TextCapitalization.sentences,
+                          textInputAction: TextInputAction.next,
+                          onEditingComplete: _bodyFocus.requestFocus,
+                          decoration: const InputDecoration(labelText: 'Title'),
+                          validator: (value) => value!.trim().isEmpty
+                              ? 'Please add a title'
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _bodyController,
+                            focusNode: _bodyFocus,
+                            readOnly: _saving,
+                            expands: true,
+                            maxLines: null,
+                            style: theme.textTheme.bodyLarge,
+                            textCapitalization: TextCapitalization.sentences,
+                            textAlignVertical: TextAlignVertical.top,
+                            decoration: InputDecoration(
+                              hintText: 'Write freely…',
+                              fillColor: scheme.surface,
+                              contentPadding: const EdgeInsets.all(16),
+                              enabledBorder: bodyBorder,
+                              focusedBorder: bodyBorder.copyWith(
+                                borderSide: BorderSide(
+                                  color: scheme.outline,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            validator: (value) => value!.trim().isEmpty
+                                ? 'Write something before saving.'
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1129,37 +1535,30 @@ class _NewEntryPageState extends State<NewEntryPage> {
 }
 
 class _EntryDetailsSheet extends StatefulWidget {
-  const _EntryDetailsSheet({required this.availablePeople, this.initialEntry});
+  const _EntryDetailsSheet({
+    required this.availablePeople,
+    required this.initialDetails,
+  });
 
   final List<String> availablePeople;
-  final DiaryEntry? initialEntry;
+  final _EntryDetails initialDetails;
 
   @override
   State<_EntryDetailsSheet> createState() => _EntryDetailsSheetState();
 }
 
 class _EntryDetailsSheetState extends State<_EntryDetailsSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
   final _newPersonController = TextEditingController();
-  late final List<String> _people = [...widget.availablePeople];
-  final Set<String> _selectedPeople = {};
-  late Mood _mood;
-  late double _rating;
-
-  @override
-  void initState() {
-    super.initState();
-    final entry = widget.initialEntry;
-    _titleController.text = entry?.title ?? '';
-    _mood = entry?.mood ?? Mood.disappointed;
-    _rating = (entry?.rating ?? 3).toDouble();
-    _selectedPeople.addAll(entry?.people ?? const []);
-  }
+  late final List<String> _people = {
+    ...widget.availablePeople,
+    ...widget.initialDetails.people,
+  }.toList();
+  late final Set<String> _selectedPeople = widget.initialDetails.people.toSet();
+  late Mood _mood = widget.initialDetails.mood;
+  late double _rating = widget.initialDetails.rating.toDouble();
 
   @override
   void dispose() {
-    _titleController.dispose();
     _newPersonController.dispose();
     super.dispose();
   }
@@ -1179,11 +1578,9 @@ class _EntryDetailsSheetState extends State<_EntryDetailsSheet> {
   }
 
   void _save() {
-    if (!_formKey.currentState!.validate()) return;
     Navigator.pop(
       context,
       _EntryDetails(
-        title: _titleController.text.trim(),
         mood: _mood,
         rating: _rating.round(),
         people: List.unmodifiable(_selectedPeople),
@@ -1193,152 +1590,115 @@ class _EntryDetailsSheetState extends State<_EntryDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          child: Row(
             children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  const Expanded(child: _SectionTitle('Finish entry')),
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                ],
-              ),
-              const SizedBox(height: 18),
-              TextFormField(
-                controller: _titleController,
-                autofocus: true,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  hintText: 'Give today a name',
-                ),
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Please add a title'
-                    : null,
-              ),
-              const SizedBox(height: 24),
-              const _SectionTitle('How do you feel?'),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: Mood.values
-                    .map(
-                      (mood) => ChoiceChip(
-                        selected: _mood == mood,
-                        showCheckmark: false,
-                        onSelected: (_) => setState(() => _mood = mood),
-                        label: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              mood.emoji,
-                              style: const TextStyle(fontSize: 24),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(mood.label),
-                          ],
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  const Expanded(child: _SectionTitle('Day rating')),
-                  Text(
-                    '${_rating.round()} / 5 ${_rating.round().emoji}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              Slider(
-                value: _rating,
-                min: 1,
-                max: 5,
-                divisions: 4,
-                label: _rating.round().toString(),
-                onChanged: (value) => setState(() => _rating = value),
-              ),
-              const SizedBox(height: 14),
-              const _SectionTitle('People'),
-              if (_people.isNotEmpty) ...[
-                const SizedBox(height: 10),
+              const Expanded(child: _SectionTitle('Entry details')),
+              FilledButton(onPressed: _save, child: const Text('Save')),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _FieldLabel('Mood'),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
-                  runSpacing: 6,
-                  children: _people
+                  children: Mood.values
                       .map(
-                        (person) => FilterChip(
-                          label: Text(person),
-                          selected: _selectedPeople.contains(person),
-                          onSelected: (selected) => setState(
-                            () => selected
-                                ? _selectedPeople.add(person)
-                                : _selectedPeople.remove(person),
-                          ),
+                        (mood) => ChoiceChip(
+                          selected: _mood == mood,
+                          showCheckmark: false,
+                          onSelected: (_) => setState(() => _mood = mood),
+                          chipAnimationStyle: _chipMotion(context),
+                          label: Text('${mood.emoji} ${mood.label}'),
                         ),
                       )
                       .toList(),
                 ),
-              ],
-              const SizedBox(height: 10),
-              TextField(
-                controller: _newPersonController,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _addPerson(),
-                decoration: InputDecoration(
-                  hintText: 'Add person',
-                  suffixIcon: IconButton(
-                    tooltip: 'Add person',
-                    onPressed: _addPerson,
-                    icon: const Icon(Icons.add),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    const Expanded(child: _FieldLabel('Day rating')),
+                    Text(
+                      '${_rating.round()} / 5 ${_rating.round().emoji}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: _rating,
+                  min: 1,
+                  max: 5,
+                  divisions: 4,
+                  label: _rating.round().toString(),
+                  onChanged: (value) => setState(() => _rating = value),
+                ),
+                const SizedBox(height: 14),
+                const _FieldLabel('People'),
+                if (_people.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    children: _people
+                        .map(
+                          (person) => FilterChip(
+                            chipAnimationStyle: _chipMotion(context),
+                            label: Text(person),
+                            selected: _selectedPeople.contains(person),
+                            onSelected: (selected) => setState(
+                              () => selected
+                                  ? _selectedPeople.add(person)
+                                  : _selectedPeople.remove(person),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _newPersonController,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _addPerson(),
+                  decoration: InputDecoration(
+                    hintText: 'Add person',
+                    suffixIcon: IconButton(
+                      tooltip: 'Add person',
+                      onPressed: _addPerson,
+                      icon: const Icon(Icons.add),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
 
 class _EntryDetails {
   const _EntryDetails({
-    required this.title,
     required this.mood,
     required this.rating,
     required this.people,
   });
 
-  final String title;
   final Mood mood;
   final int rating;
   final List<String> people;
@@ -1355,6 +1715,31 @@ class _SectionTitle extends StatelessWidget {
     style: Theme.of(
       context,
     ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+  );
+}
+
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    label,
+    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      letterSpacing: .45,
+    ),
+  );
+}
+
+ChipAnimationStyle _chipMotion(BuildContext context) {
+  final animation = diaryAnimation(context);
+  return ChipAnimationStyle(
+    selectAnimation: animation,
+    enableAnimation: animation,
+    avatarDrawerAnimation: animation,
+    deleteDrawerAnimation: animation,
   );
 }
 

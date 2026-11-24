@@ -11,6 +11,8 @@ enum Mood {
   excited,
 }
 
+enum EntryCategory { diary, dream }
+
 class DiaryEntry {
   const DiaryEntry({
     required this.id,
@@ -20,6 +22,7 @@ class DiaryEntry {
     required this.mood,
     required this.rating,
     required this.people,
+    this.category = EntryCategory.diary,
   });
 
   final String id;
@@ -29,6 +32,7 @@ class DiaryEntry {
   final Mood mood;
   final int rating;
   final List<String> people;
+  final EntryCategory category;
 
   factory DiaryEntry.fromJson(Map<String, dynamic> json) => DiaryEntry(
     id: json['id'] as String,
@@ -38,6 +42,9 @@ class DiaryEntry {
     mood: _moodFromJson(json['mood'] as String),
     rating: json['rating'] as int,
     people: List<String>.from(json['people'] as List),
+    category: json['category'] == EntryCategory.dream.name
+        ? EntryCategory.dream
+        : EntryCategory.diary,
   );
 
   Map<String, dynamic> toJson() => {
@@ -48,6 +55,7 @@ class DiaryEntry {
     'mood': mood.name,
     'rating': rating,
     'people': people,
+    'category': category.name,
   };
 }
 

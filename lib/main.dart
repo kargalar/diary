@@ -6,7 +6,15 @@ import 'ui/diary_view_model.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final viewModel = DiaryViewModel(DiaryRepository());
+  final repository = DiaryRepository();
+  final viewModel = DiaryViewModel(repository);
+  final darkTheme = repository.loadDarkTheme();
   await viewModel.load();
-  runApp(DiaryApp(viewModel: viewModel));
+  runApp(
+    DiaryApp(
+      viewModel: viewModel,
+      initialDarkTheme: await darkTheme,
+      onThemeChanged: repository.saveDarkTheme,
+    ),
+  );
 }

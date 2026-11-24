@@ -1,17 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-val releaseKeystorePath = System.getenv("KARGALAR_KEYSTORE_PATH")
-    ?: error("KARGALAR_KEYSTORE_PATH is required for release signing")
-val releaseKeystorePassword = System.getenv("KARGALAR_KEYSTORE_PASSWORD")
-    ?: error("KARGALAR_KEYSTORE_PASSWORD is required for release signing")
-val releaseKeyAlias = System.getenv("KARGALAR_KEY_ALIAS")
-    ?: error("KARGALAR_KEY_ALIAS is required for release signing")
-val releaseKeyPassword = System.getenv("KARGALAR_KEY_PASSWORD")
-    ?: error("KARGALAR_KEY_PASSWORD is required for release signing")
+val signingPropertiesFile = rootProject.file("key.properties")
+val signingProperties = Properties()
+if (signingPropertiesFile.isFile) {
+    signingPropertiesFile.inputStream().use { signingProperties.load(it) }
+}
+
+fun releaseSigningValue(environmentName: String, propertyName: String): String =
+    providers.environmentVariable(environmentName).orNull?.takeIf { it.isNotBlank() }
+        ?: signingProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+        ?: error("Set $environmentName or $propertyName in android/key.properties for release signing")
 
 android {
     namespace = "com.example.diary"
@@ -36,10 +40,15 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(releaseKeystorePath)
-            storePassword = releaseKeystorePassword
-            keyAlias = releaseKeyAlias
-            keyPassword = releaseKeyPassword
+            val keystorePath = releaseSigningValue("KARGALAR_KEYSTORE_PATH", "storeFile")
+            storeFile = if (providers.environmentVariable("KARGALAR_KEYSTORE_PATH").orNull.isNullOrBlank()) {
+                rootProject.file(keystorePath)
+            } else {
+                file(keystorePath)
+            }
+            storePassword = releaseSigningValue("KARGALAR_KEYSTORE_PASSWORD", "storePassword")
+            keyAlias = releaseSigningValue("KARGALAR_KEY_ALIAS", "keyAlias")
+            keyPassword = releaseSigningValue("KARGALAR_KEY_PASSWORD", "keyPassword")
         }
     }
 

@@ -11,8 +11,16 @@ class DiaryViewModel extends ChangeNotifier {
 
   List<DiaryEntry> get entries => List.unmodifiable(_entries);
 
-  List<String> get people =>
-      {for (final entry in _entries) ...entry.people}.toList()
+  List<DiaryEntry> entriesIn(EntryCategory category) =>
+      _entries.where((entry) => entry.category == category).toList();
+
+  List<String> get people => _peopleFrom(_entries);
+
+  List<String> peopleIn(EntryCategory category) =>
+      _peopleFrom(entriesIn(category));
+
+  List<String> _peopleFrom(Iterable<DiaryEntry> entries) =>
+      {for (final entry in entries) ...entry.people}.toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
   Future<void> load() async {
