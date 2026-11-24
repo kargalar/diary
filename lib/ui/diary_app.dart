@@ -232,21 +232,13 @@ class _DiaryHomePageState extends State<DiaryHomePage>
               dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             ),
           ),
-          const SizedBox(width: 8),
-          if (width < 300 || (width < 440 && largeLabels))
-            IconButton.filled(
-              tooltip: 'New entry',
-              style: theme.filledButtonTheme.style,
-              onPressed: _openNewEntry,
-              icon: const Icon(Icons.add),
-            )
-          else
-            FilledButton.icon(
-              onPressed: _openNewEntry,
-              icon: const Icon(Icons.add),
-              label: const Text('New entry'),
-            ),
         ],
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openNewEntry,
+        icon: const Icon(Icons.add),
+        label: const Text('New entry'),
       ),
       body: SafeArea(
         top: false,
@@ -444,8 +436,6 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-enum _EntryAction { edit, delete }
-
 class _EntryCard extends StatefulWidget {
   const _EntryCard({super.key, required this.entry, required this.viewModel});
 
@@ -495,15 +485,6 @@ class _EntryCardState extends State<_EntryCard> {
     ),
   );
 
-  void _selectAction(_EntryAction action) {
-    switch (action) {
-      case _EntryAction.edit:
-        _openEntry();
-      case _EntryAction.delete:
-        _confirmDelete();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final entry = widget.entry;
@@ -529,7 +510,7 @@ class _EntryCardState extends State<_EntryCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.only(right: 40),
+                    padding: EdgeInsets.zero,
                     child: Row(
                       children: [
                         _MoodMark(mood: entry.mood),
@@ -566,54 +547,10 @@ class _EntryCardState extends State<_EntryCard> {
               ),
             ),
           ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: PopupMenuButton<_EntryAction>(
-              tooltip: 'Entry actions',
-              icon: const Icon(Icons.more_horiz),
-              position: PopupMenuPosition.under,
-              popUpAnimationStyle: diaryAnimation(context),
-              onSelected: _selectAction,
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: _EntryAction.edit,
-                  height: 42,
-                  child: _MenuLabel(icon: Icons.edit_outlined, label: 'Edit'),
-                ),
-                PopupMenuItem(
-                  value: _EntryAction.delete,
-                  height: 42,
-                  child: _MenuLabel(
-                    icon: Icons.delete_outline,
-                    label: 'Delete',
-                    color: scheme.error,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
   }
-}
-
-class _MenuLabel extends StatelessWidget {
-  const _MenuLabel({required this.icon, required this.label, this.color});
-
-  final IconData icon;
-  final String label;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Icon(icon, size: 16, color: color),
-      const SizedBox(width: 8),
-      Text(label, style: TextStyle(color: color)),
-    ],
-  );
 }
 
 class _MoodMark extends StatelessWidget {
