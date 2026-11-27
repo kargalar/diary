@@ -1484,14 +1484,13 @@ class _NewEntryPageState extends State<NewEntryPage> {
           leading: BackButton(
             onPressed: _saving ? null : () => Navigator.maybePop(context),
           ),
-          actions: [
-            IconButton.filled(
-              tooltip: 'Entry details',
-              onPressed: _saving ? null : _finishEntry,
-              style: theme.filledButtonTheme.style,
-              icon: const Icon(Icons.edit_outlined),
-            ),
-          ],
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButton: FloatingActionButton(
+          heroTag: null,
+          tooltip: 'Entry details',
+          onPressed: _saving ? null : _finishEntry,
+          child: const Icon(Icons.check),
         ),
         body: SafeArea(
           top: false,

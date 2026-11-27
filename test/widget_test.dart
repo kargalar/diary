@@ -21,6 +21,14 @@ void main() {
     expect(find.text('Your story starts here'), findsOneWidget);
     await tester.tap(find.text('New entry'));
     await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.edit_outlined), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(FloatingActionButton),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
     final title = find.widgetWithText(TextFormField, 'Title');
     final body = find.widgetWithText(TextFormField, 'Write freely…');
     final bodyInput = find.descendant(
@@ -103,6 +111,22 @@ void main() {
     expect(tester.getTopLeft(title).dx, greaterThan(insets.left));
     expect(tester.getTopLeft(title).dy, greaterThan(insets.top));
     expect(tester.getBottomRight(body).dy, lessThan(640 - insets.bottom));
+    expect(find.byIcon(Icons.edit_outlined), findsNothing);
+    final saveFab = find.widgetWithIcon(FloatingActionButton, Icons.check);
+    expect(saveFab, findsOneWidget);
+    expect(
+      tester
+          .widget<Scaffold>(
+            find.descendant(
+              of: find.byType(NewEntryPage),
+              matching: find.byType(Scaffold),
+            ),
+          )
+          .floatingActionButtonLocation,
+      FloatingActionButtonLocation.endFloat,
+    );
+    expect(tester.getBottomRight(saveFab).dx, lessThanOrEqualTo(360 - insets.right));
+    expect(tester.getBottomRight(saveFab).dy, lessThanOrEqualTo(640 - insets.bottom));
     await tester.tap(find.byTooltip('Entry details'));
     await tester.pumpAndSettle();
     final addPerson = find.widgetWithText(TextField, 'Add person');
