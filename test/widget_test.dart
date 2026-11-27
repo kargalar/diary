@@ -321,4 +321,144 @@ void main() {
     expect(find.text('Morning walk'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('auto-saves valid changes when pressing back in edit mode', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = DiaryRepository();
+    final viewModel = DiaryViewModel(repository);
+    final createdAt = DateTime(2026, 5, 10, 9, 30);
+    await viewModel.add(
+      DiaryEntry(
+        id: 'edit-back-entry',
+        title: 'Original title',
+        body: 'Original body',
+        createdAt: createdAt,
+        mood: Mood.calm,
+        rating: 4,
+        people: const ['Ada'],
+      ),
+    );
+    await tester.pumpWidget(DiaryApp(viewModel: viewModel));
+
+    final titleField = find.widgetWithText(TextFormField, 'Title');
+    final bodyField = find.widgetWithText(TextFormField, 'Write freely…');
+
+    await tester.tap(find.text('Original title'));
+    await tester.pumpAndSettle();
+    await tester.enterText(titleField, 'Updated via back button');
+    await tester.enterText(bodyField, 'Saved automatically on back.');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save entry?'), findsNothing);
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.text('Updated via back button'), findsOneWidget);
+    expect(find.text('Saved automatically on back.'), findsOneWidget);
+    expect(viewModel.entries.single.id, 'edit-back-entry');
+    expect(viewModel.entries.single.createdAt, createdAt);
+
+    await tester.tap(find.text('Updated via back button'));
+    await tester.pumpAndSettle();
+    await tester.enterText(bodyField, 'Saved on system back.');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saved on system back.'), findsOneWidget);
+    expect(viewModel.entries.single.body, 'Saved on system back.');
+
+    await tester.tap(find.text('Updated via back button'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Updated via back button'), findsOneWidget);
+
+    await tester.tap(find.text('Updated via back button'));
+    await tester.pumpAndSettle();
+    await tester.enterText(titleField, '');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Discard changes?'), findsOneWidget);
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit entry'), findsOneWidget);
+    expect(find.text('Please add a title'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsOneWidget);
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Updated via back button'), findsOneWidget);
+    expect(viewModel.entries.single.title, 'Updated via back button');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('prompts to save when pressing back in new entry mode', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final viewModel = DiaryViewModel(DiaryRepository());
+    await viewModel.load();
+    await tester.pumpWidget(DiaryApp(viewModel: viewModel));
+
+    await tester.tap(find.text('New entry'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Save entry?'), findsNothing);
+    expect(viewModel.entries, isEmpty);
+
+    final titleField = find.widgetWithText(TextFormField, 'Title');
+    final bodyField = find.widgetWithText(TextFormField, 'Write freely…');
+
+    await tester.tap(find.text('New entry'));
+    await tester.pumpAndSettle();
+    await tester.enterText(titleField, 'Draft note');
+    await tester.enterText(bodyField, 'Unsaved draft body');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save entry?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New entry'), findsOneWidget);
+    expect(find.text('Draft note'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Save entry?'), findsOneWidget);
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(viewModel.entries, isEmpty);
+    expect(find.text('Your story starts here'), findsOneWidget);
+
+    await tester.tap(find.text('New entry'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dream'));
+    await tester.enterText(titleField, 'Lucid flight');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Save entry?'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Write something before saving.'), findsOneWidget);
+    expect(viewModel.entries, isEmpty);
+
+    await tester.enterText(bodyField, 'Soared above quiet mountains.');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Save entry?'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lucid flight'), findsOneWidget);
+    expect(find.text('Soared above quiet mountains.'), findsOneWidget);
+    expect(viewModel.entries.single.category, EntryCategory.dream);
+    expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 1);
+    expect(tester.takeException(), isNull);
+  });
 }

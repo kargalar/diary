@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -478,7 +479,7 @@ class _EntryCardState extends State<_EntryCard> {
   }
 
   void _openEntry() => Navigator.of(context).push(
-    diaryPageRoute(
+    diaryPageRoute<EntryCategory>(
       context,
       (_) =>
           NewEntryPage(viewModel: widget.viewModel, initialEntry: widget.entry),
@@ -1265,6 +1266,8 @@ class _DiaryFilter {
   final String? person;
 }
 
+enum _BackAction { cancel, discard, save }
+
 class NewEntryPage extends StatefulWidget {
   const NewEntryPage({
     super.key,
@@ -1299,8 +1302,23 @@ class _NewEntryPageState extends State<NewEntryPage> {
   late EntryCategory _category =
       widget.initialEntry?.category ?? widget.initialCategory;
   bool _saving = false;
+  bool _handlingBack = false;
 
   bool get _isEditing => widget.initialEntry != null;
+
+  bool get _hasDraftContent =>
+      _titleController.text.trim().isNotEmpty ||
+      _bodyController.text.trim().isNotEmpty;
+
+  bool get _hasEditChanges {
+    final initial = widget.initialEntry;
+    if (initial == null) return false;
+    return _titleController.text.trim() != initial.title ||
+        _bodyController.text.trim() != initial.body ||
+        _details.mood != initial.mood ||
+        _details.rating != initial.rating ||
+        !listEquals(_details.people, initial.people);
+  }
 
   @override
   void dispose() {
@@ -1311,19 +1329,7 @@ class _NewEntryPageState extends State<NewEntryPage> {
     super.dispose();
   }
 
-  Future<void> _finishEntry() async {
-    FocusScope.of(context).unfocus();
-    final details = await showDiaryPanel<_EntryDetails>(
-      context,
-      _EntryDetailsSheet(
-        availablePeople: widget.viewModel.people,
-        initialDetails: _details,
-      ),
-      bottomSheet: true,
-    );
-    if (details == null || !mounted) return;
-    _details = details;
-
+  Future<void> _saveEntry() async {
     final title = _titleController.text.trim();
     final body = _bodyController.text.trim();
     if (!_formKey.currentState!.validate()) {
@@ -1339,9 +1345,9 @@ class _NewEntryPageState extends State<NewEntryPage> {
       title: title,
       body: body,
       createdAt: existingEntry?.createdAt ?? now,
-      mood: details.mood,
-      rating: details.rating,
-      people: details.people,
+      mood: _details.mood,
+      rating: _details.rating,
+      people: _details.people,
       category: _category,
     );
     if (_isEditing) {
@@ -1350,6 +1356,110 @@ class _NewEntryPageState extends State<NewEntryPage> {
       await widget.viewModel.add(entry);
     }
     if (mounted) Navigator.pop(context, _category);
+  }
+
+  Future<void> _finishEntry() async {
+    FocusScope.of(context).unfocus();
+    final details = await showDiaryPanel<_EntryDetails>(
+      context,
+      _EntryDetailsSheet(
+        availablePeople: widget.viewModel.people,
+        initialDetails: _details,
+      ),
+      bottomSheet: true,
+    );
+    if (details == null || !mounted) return;
+    _details = details;
+    await _saveEntry();
+  }
+
+  Future<void> _handleBack() async {
+    if (_saving || _handlingBack) return;
+    _handlingBack = true;
+    FocusScope.of(context).unfocus();
+    try {
+      if (_isEditing) {
+        if (!_hasEditChanges) {
+          if (mounted) Navigator.pop(context);
+          return;
+        }
+        if (_formKey.currentState!.validate()) {
+          await _saveEntry();
+          return;
+        }
+        final discard = await showDialog<bool>(
+          context: context,
+          animationStyle: diaryAnimation(context),
+          builder: (context) => AlertDialog(
+            title: const Text('Discard changes?'),
+            content: const Text(
+              'Add both a title and content to save your changes, or discard them.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  foregroundColor: Theme.of(context).colorScheme.onError,
+                ),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        if (discard == true) {
+          Navigator.pop(context);
+        } else {
+          (_titleController.text.trim().isEmpty ? _titleFocus : _bodyFocus)
+              .requestFocus();
+        }
+        return;
+      }
+
+      if (!_hasDraftContent) {
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+
+      final action = await showDialog<_BackAction>(
+        context: context,
+        animationStyle: diaryAnimation(context),
+        builder: (context) => AlertDialog(
+          title: const Text('Save entry?'),
+          content: const Text('Do you want to save this entry before leaving?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, _BackAction.cancel),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, _BackAction.discard),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, _BackAction.save),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      switch (action) {
+        case _BackAction.save:
+          await _saveEntry();
+        case _BackAction.discard:
+          Navigator.pop(context);
+        case _BackAction.cancel || null:
+          break;
+      }
+    } finally {
+      _handlingBack = false;
+    }
   }
 
   @override
@@ -1361,104 +1471,118 @@ class _NewEntryPageState extends State<NewEntryPage> {
       borderSide: BorderSide(color: scheme.outlineVariant),
     );
 
-    return Scaffold(
-      appBar: _PageBar(
-        title: _isEditing ? 'Edit entry' : 'New entry',
-        maxWidth: 740,
-        leading: const BackButton(),
-        actions: [
-          IconButton.filled(
-            tooltip: 'Entry details',
-            onPressed: _saving ? null : _finishEntry,
-            style: theme.filledButtonTheme.style,
-            icon: const Icon(Icons.edit_outlined),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        child: _ContentWidth(
+    return PopScope<EntryCategory>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack();
+      },
+      child: Scaffold(
+        appBar: _PageBar(
+          title: _isEditing ? 'Edit entry' : 'New entry',
           maxWidth: 740,
-          child: LayoutBuilder(
-            builder: (context, constraints) => SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-              child: SizedBox(
-                height: math.max(240, constraints.maxHeight),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (!_isEditing) ...[
-                          SegmentedButton<EntryCategory>(
-                            style: const ButtonStyle(
-                              shape: WidgetStatePropertyAll(diaryControlShape),
-                            ),
-                            segments: const [
-                              ButtonSegment(
-                                value: EntryCategory.diary,
-                                label: Text('Diary'),
-                              ),
-                              ButtonSegment(
-                                value: EntryCategory.dream,
-                                label: Text('Dream'),
-                              ),
-                            ],
-                            selected: {_category},
-                            showSelectedIcon: false,
-                            onSelectionChanged: _saving
-                                ? null
-                                : (selection) => setState(
-                                    () => _category = selection.single,
-                                  ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        TextFormField(
-                          controller: _titleController,
-                          focusNode: _titleFocus,
-                          autofocus: !_isEditing,
-                          readOnly: _saving,
-                          style: theme.textTheme.titleLarge,
-                          textCapitalization: TextCapitalization.sentences,
-                          textInputAction: TextInputAction.next,
-                          onEditingComplete: _bodyFocus.requestFocus,
-                          decoration: const InputDecoration(labelText: 'Title'),
-                          validator: (value) => value!.trim().isEmpty
-                              ? 'Please add a title'
-                              : null,
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _bodyController,
-                            focusNode: _bodyFocus,
-                            readOnly: _saving,
-                            expands: true,
-                            maxLines: null,
-                            style: theme.textTheme.bodyLarge,
-                            textCapitalization: TextCapitalization.sentences,
-                            textAlignVertical: TextAlignVertical.top,
-                            decoration: InputDecoration(
-                              hintText: 'Write freely…',
-                              fillColor: scheme.surface,
-                              contentPadding: const EdgeInsets.all(16),
-                              enabledBorder: bodyBorder,
-                              focusedBorder: bodyBorder.copyWith(
-                                borderSide: BorderSide(
-                                  color: scheme.outline,
-                                  width: 2,
+          leading: BackButton(
+            onPressed: _saving ? null : () => Navigator.maybePop(context),
+          ),
+          actions: [
+            IconButton.filled(
+              tooltip: 'Entry details',
+              onPressed: _saving ? null : _finishEntry,
+              style: theme.filledButtonTheme.style,
+              icon: const Icon(Icons.edit_outlined),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          top: false,
+          child: _ContentWidth(
+            maxWidth: 740,
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.manual,
+                child: SizedBox(
+                  height: math.max(240, constraints.maxHeight),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!_isEditing) ...[
+                            SegmentedButton<EntryCategory>(
+                              style: const ButtonStyle(
+                                shape: WidgetStatePropertyAll(
+                                  diaryControlShape,
                                 ),
                               ),
+                              segments: const [
+                                ButtonSegment(
+                                  value: EntryCategory.diary,
+                                  label: Text('Diary'),
+                                ),
+                                ButtonSegment(
+                                  value: EntryCategory.dream,
+                                  label: Text('Dream'),
+                                ),
+                              ],
+                              selected: {_category},
+                              showSelectedIcon: false,
+                              onSelectionChanged: _saving
+                                  ? null
+                                  : (selection) => setState(
+                                      () => _category = selection.single,
+                                    ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          TextFormField(
+                            controller: _titleController,
+                            focusNode: _titleFocus,
+                            autofocus: !_isEditing,
+                            readOnly: _saving,
+                            style: theme.textTheme.titleLarge,
+                            textCapitalization: TextCapitalization.sentences,
+                            textInputAction: TextInputAction.next,
+                            onEditingComplete: _bodyFocus.requestFocus,
+                            decoration: const InputDecoration(
+                              labelText: 'Title',
                             ),
                             validator: (value) => value!.trim().isEmpty
-                                ? 'Write something before saving.'
+                                ? 'Please add a title'
                                 : null,
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _bodyController,
+                              focusNode: _bodyFocus,
+                              readOnly: _saving,
+                              expands: true,
+                              maxLines: null,
+                              style: theme.textTheme.bodyLarge,
+                              textCapitalization: TextCapitalization.sentences,
+                              textAlignVertical: TextAlignVertical.top,
+                              decoration: InputDecoration(
+                                hintText: 'Write freely…',
+                                fillColor: scheme.surface,
+                                contentPadding: const EdgeInsets.all(16),
+                                enabledBorder: bodyBorder,
+                                focusedBorder: bodyBorder.copyWith(
+                                  borderSide: BorderSide(
+                                    color: scheme.outline,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                              validator: (value) => value!.trim().isEmpty
+                                  ? 'Write something before saving.'
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
